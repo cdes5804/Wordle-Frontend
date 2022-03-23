@@ -9,8 +9,8 @@ import {
   GAME_COPIED_MESSAGE,
   NOT_ENOUGH_LETTERS_MESSAGE,
   WORD_NOT_FOUND_MESSAGE,
-  CORRECT_WORD_MESSAGE,
   HARD_MODE_ALERT_MESSAGE,
+  USER_INVALID,
 } from './constants/strings'
 import {
   MAX_WORD_LENGTH,
@@ -18,27 +18,24 @@ import {
   REVEAL_TIME_MS,
   GAME_LOST_INFO_DELAY,
   WELCOME_INFO_MODAL_MS,
+  OK,
+  WORD_NOT_FOUND,
+  INVALID_USER,
+  WON,
+  LOST,
+  CORRECT,
+  PRESENT,
+  ABSENT,
 } from './constants/settings'
-import {
-  isWordInWordList,
-  isWinningWord,
-  solution,
-  findFirstUnusedReveal,
-  unicodeLength,
-} from './lib/words'
+import { unicodeLength } from './lib/words'
 import { addStatsForCompletedGame, loadStats } from './lib/stats'
-import {
-  loadGameStateFromLocalStorage,
-  saveGameStateToLocalStorage,
-  setStoredIsHighContrastMode,
-  getStoredIsHighContrastMode,
-} from './lib/localStorage'
 import { default as GraphemeSplitter } from 'grapheme-splitter'
 
 import './App.css'
 import { AlertContainer } from './components/alerts/AlertContainer'
 import { useAlert } from './context/AlertContext'
 import { Navbar } from './components/navbar/Navbar'
+import { CharStatus } from './lib/statuses'
 
 function App() {
   const prefersDarkMode = window.matchMedia(
@@ -47,6 +44,7 @@ function App() {
 
   const { showError: showErrorAlert, showSuccess: showSuccessAlert } =
     useAlert()
+  const [userId, setUserId] = useState(0)
   const [currentGuess, setCurrentGuess] = useState('')
   const [isGameWon, setIsGameWon] = useState(false)
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false)
@@ -61,44 +59,35 @@ function App() {
       ? true
       : false
   )
-  const [isHighContrastMode, setIsHighContrastMode] = useState(
-    getStoredIsHighContrastMode()
-  )
+  const [isHighContrastMode, setIsHighContrastMode] = useState(false)
   const [isRevealing, setIsRevealing] = useState(false)
-  const [guesses, setGuesses] = useState<string[]>(() => {
-    const loaded = loadGameStateFromLocalStorage()
-    if (loaded?.solution !== solution) {
-      return []
-    }
-    const gameWasWon = loaded.guesses.includes(solution)
-    if (gameWasWon) {
-      setIsGameWon(true)
-    }
-    if (loaded.guesses.length === MAX_CHALLENGES && !gameWasWon) {
-      setIsGameLost(true)
-      showErrorAlert(CORRECT_WORD_MESSAGE(solution), {
-        persist: true,
-      })
-    }
-    return loaded.guesses
-  })
+  const [guesses, setGuesses] = useState<string[]>([])
+  const [statuses, setStatuses] = useState<CharStatus[][]>([])
 
   const [stats, setStats] = useState(() => loadStats())
 
-  const [isHardMode, setIsHardMode] = useState(
-    localStorage.getItem('gameMode')
-      ? localStorage.getItem('gameMode') === 'hard'
-      : false
-  )
+  const [isHardMode, setIsHardMode] = useState(false)
 
   useEffect(() => {
     // if no game state on load,
     // show the user the how-to info modal
-    if (!loadGameStateFromLocalStorage()) {
-      setTimeout(() => {
-        setIsInfoModalOpen(true)
-      }, WELCOME_INFO_MODAL_MS)
+    setTimeout(() => {
+      setIsInfoModalOpen(true)
+    }, WELCOME_INFO_MODAL_MS)
+  }, [])
+
+  useEffect(() => {
+    const connectWithServer = async () => {
+      const response = await fetch(
+        `${process.env.REACT_APP_BACK_END_API_URL}:${process.env.REACT_APP_BACK_END_API_PORT}/connect`,
+        {
+          method: 'POST',
+        }
+      )
+      const user_id = (await response.json()).user_id
+      setUserId(user_id)
     }
+    connectWithServer()
   }, [])
 
   useEffect(() => {
@@ -131,16 +120,11 @@ function App() {
 
   const handleHighContrastMode = (isHighContrast: boolean) => {
     setIsHighContrastMode(isHighContrast)
-    setStoredIsHighContrastMode(isHighContrast)
   }
 
   const clearCurrentRowClass = () => {
     setCurrentRowClass('')
   }
-
-  useEffect(() => {
-    saveGameStateToLocalStorage({ guesses, solution })
-  }, [guesses])
 
   useEffect(() => {
     if (isGameWon) {
@@ -177,7 +161,7 @@ function App() {
     )
   }
 
-  const onEnter = () => {
+  const onEnter = async () => {
     if (isGameWon || isGameLost) {
       return
     }
@@ -189,22 +173,31 @@ function App() {
       })
     }
 
-    if (!isWordInWordList(currentGuess)) {
+    const data = {
+      guess: currentGuess,
+      user_id: userId,
+    }
+
+    const response = await (
+      await fetch(
+        `${process.env.REACT_APP_BACK_END_API_URL}:${process.env.REACT_APP_BACK_END_API_PORT}/guess`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }
+      )
+    ).json()
+
+    if (response.reply_status === INVALID_USER) {
+      setCurrentRowClass('jiggle')
+      return showErrorAlert(USER_INVALID, {
+        onClose: clearCurrentRowClass,
+      })
+    } else if (response.reply_status === WORD_NOT_FOUND) {
       setCurrentRowClass('jiggle')
       return showErrorAlert(WORD_NOT_FOUND_MESSAGE, {
         onClose: clearCurrentRowClass,
       })
-    }
-
-    // enforce hard mode - all guesses must contain all previously revealed letters
-    if (isHardMode) {
-      const firstMissingReveal = findFirstUnusedReveal(currentGuess, guesses)
-      if (firstMissingReveal) {
-        setCurrentRowClass('jiggle')
-        return showErrorAlert(firstMissingReveal, {
-          onClose: clearCurrentRowClass,
-        })
-      }
     }
 
     setIsRevealing(true)
@@ -213,29 +206,38 @@ function App() {
     setTimeout(() => {
       setIsRevealing(false)
     }, REVEAL_TIME_MS * MAX_WORD_LENGTH)
-
-    const winningWord = isWinningWord(currentGuess)
-
     if (
       unicodeLength(currentGuess) === MAX_WORD_LENGTH &&
-      guesses.length < MAX_CHALLENGES &&
+      (response.reply_status === OK ||
+        response.reply_status === WON ||
+        response.reply_status === LOST) &&
       !isGameWon
     ) {
+      const status: CharStatus[] = []
+      response.guess_results.forEach((result: number) => {
+        console.log(result)
+        if (result === CORRECT) {
+          status.push('correct')
+        } else if (result === PRESENT) {
+          status.push('present')
+        } else if (result === ABSENT) {
+          status.push('absent')
+        }
+      })
+
+      console.log(status)
+      setStatuses([...statuses, status])
       setGuesses([...guesses, currentGuess])
       setCurrentGuess('')
 
-      if (winningWord) {
+      if (response.reply_status === WON) {
         setStats(addStatsForCompletedGame(stats, guesses.length))
         return setIsGameWon(true)
       }
 
-      if (guesses.length === MAX_CHALLENGES - 1) {
+      if (response.reply_status === LOST) {
         setStats(addStatsForCompletedGame(stats, guesses.length + 1))
         setIsGameLost(true)
-        showErrorAlert(CORRECT_WORD_MESSAGE(solution), {
-          persist: true,
-          delayMs: REVEAL_TIME_MS * MAX_WORD_LENGTH + 1,
-        })
       }
     }
   }
@@ -251,6 +253,7 @@ function App() {
         <div className="pb-6 grow">
           <Grid
             guesses={guesses}
+            statuses={statuses}
             currentGuess={currentGuess}
             isRevealing={isRevealing}
             currentRowClassName={currentRowClass}
