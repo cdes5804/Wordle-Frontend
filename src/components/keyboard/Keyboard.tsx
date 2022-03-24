@@ -1,4 +1,4 @@
-import { getStatuses } from '../../lib/statuses'
+import { CharStatus } from '../../lib/statuses'
 import { Key } from './Key'
 import { useEffect } from 'react'
 import { ENTER_TEXT, DELETE_TEXT } from '../../constants/strings'
@@ -10,6 +10,7 @@ type Props = {
   onEnter: () => void
   guesses: string[]
   isRevealing?: boolean
+  statuses: CharStatus[][]
 }
 
 export const Keyboard = ({
@@ -18,8 +19,24 @@ export const Keyboard = ({
   onEnter,
   guesses,
   isRevealing,
+  statuses,
 }: Props) => {
-  const charStatuses = getStatuses(guesses)
+  const charStatuses: { [key: string]: CharStatus } = {}
+  guesses.forEach((guess, i) => {
+    guess.split('').forEach((char, j) => {
+      const status = statuses[i][j]
+      if (!(char in charStatuses)) {
+        charStatuses[char] = status
+      } else {
+        if (
+          (status === 'present' && charStatuses[char] !== 'correct') ||
+          status === 'correct'
+        ) {
+          charStatuses[char] = status
+        }
+      }
+    })
+  })
 
   const onClick = (value: string) => {
     if (value === 'ENTER') {

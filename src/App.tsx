@@ -264,6 +264,7 @@ function App() {
           onDelete={onDelete}
           onEnter={onEnter}
           guesses={guesses}
+          statuses={statuses}
           isRevealing={isRevealing}
         />
         <InfoModal
