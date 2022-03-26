@@ -275,6 +275,7 @@ function App() {
           isOpen={isStatsModalOpen}
           handleClose={() => setIsStatsModalOpen(false)}
           guesses={guesses}
+          statuses={statuses}
           gameStats={stats}
           isGameLost={isGameLost}
           isGameWon={isGameWon}
@@ -287,8 +288,6 @@ function App() {
         <SettingsModal
           isOpen={isSettingsModalOpen}
           handleClose={() => setIsSettingsModalOpen(false)}
-          isHardMode={isHardMode}
-          handleHardMode={handleHardMode}
           isDarkMode={isDarkMode}
           handleDarkMode={handleDarkMode}
           isHighContrastMode={isHighContrastMode}
